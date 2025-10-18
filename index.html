@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MW: MURDERWARE - SYSTEM.EXE IS COMPROMISED</title>
+    <style>
+        /* --- ESTILO ASCII / VHS --- */
+        body {
+            background-color: #000;
+            color: #0F0; /* Fósforo Verde por defecto */
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            cursor: crosshair;
+        }
+        #game-screen {
+            white-space: pre; /* Preserva el formato ASCII */
+            border: 2px solid #060;
+            box-shadow: 0 0 10px #0F0;
+            user-select: none; /* Evita seleccionar texto */
+        }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #0FF; /* Cian para el HUD */
+            font-size: 14px;
+            white-space: pre-wrap;
+            pointer-events: none; /* No interfiere con el juego */
+            text-shadow: 0 0 5px #0FF;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-screen">Cargando MW: MURDERWARE...</div>
+    <div id="hud"></div>
+
+    <script>
+        // =========================================================
+        // === 1. CONFIGURACIÓN INICIAL Y CONSTANTES ===
+        // =========================================================
+
+        const SCREEN_WIDTH = 80;
+        const SCREEN_HEIGHT = 25;
+        const FPS = 30;
+        const FRAME_TIME = 1000 / FPS;
+
+        // Representación ASCII
+        const CHARS = {
+            PLAYER: 'P',
+            ENEMY_ERROR: 'E',
+            DATA_CLUSTER: '[D]',
+            CORE_FILE: '[F]',
+            WALL: '#',
+            BULLET: '.',
+            EMPTY: ' '
+        };
+        
+        // Paleta de colores para BYTE_SCRAMBLE (HTML/CSS)
+        const VHS_COLORS = ['#F00', '#0FF', '#FF0', '#F0F', '#0F0', '#FFF']; 
+        
+        let gameMap = [];
+        let player = { x: 10, y: 10, hp: 10, speed: 1.0, dashCooldown: 0 };
+        let entities = []; // Lista de enemigos y balas
+        let targets = [];  // Lista de Data Clusters y Core Files
+        let keyPressed = {}; // Para el movimiento WASD
+
+        // =========================================================
+        // === 2. LÓGICA DE INICIALIZACIÓN Y RENDERIZADO BÁSICO ===
+        // =========================================================
+
+        function initGame() {
+            // Generación de un mapa base vacío
+            gameMap = Array(SCREEN_HEIGHT).fill().map(() => Array(SCREEN_WIDTH).fill(CHARS.EMPTY));
+
+            // Colocar jugador y objetivos iniciales (SIMPLIFICADO)
+            player.x = Math.floor(SCREEN_WIDTH / 4);
+            player.y = Math.floor(SCREEN_HEIGHT / 2);
+
+            targets.push({ x: 60, y: 10, type: CHARS.DATA_CLUSTER, hp: 3 });
+            targets.push({ x: 65, y: 15, type: CHARS.DATA_CLUSTER, hp: 3 });
+
+            // Generar enemigos iniciales (Runtime Errors)
+            for (let i = 0; i < 5; i++) {
+                entities.push({
+                    x: Math.floor(Math.random() * 50) + 20, 
+                    y: Math.floor(Math.random() * (SCREEN_HEIGHT - 2)) + 1,
+                    type: CHARS.ENEMY_ERROR,
+                    hp: 1,
+                    speed: 0.5
+                });
+            }
+            
+            // Iniciar el bucle de juego
+            setInterval(gameLoop, FRAME_TIME);
+            
+            // Nota: La música y los efectos deben inicializarse aquí.
+            // window.addEventListener('click', initAudio, { once: true }); 
+        }
+
+        // Dibuja un carácter en la posición (x, y) del mapa
+        function drawCharacter(x, y, char, color = '#0F0') {
+            const ix = Math.round(x);
+            const iy = Math.round(y);
+            if (iy >= 0 && iy < SCREEN_HEIGHT && ix >= 0 && ix < SCREEN_WIDTH) {
+                // Aquí usamos una estructura de array para manejar el color en el render final
+                gameMap[iy][ix] = { char: char, color: color }; 
+            }
+        }
+        
+        // Dibuja el estado actual del mapa en la pantalla
+        function renderMap() {
+            let output = '';
+            for (let y = 0; y < SCREEN_HEIGHT; y++) {
+                let row = '';
+                for (let x = 0; x < SCREEN_WIDTH; x++) {
+                    const cell = gameMap[y][x];
+                    if (typeof cell === 'object') {
+                        // Utiliza <span style="color:..."> para aplicar color dinámico
+                        row += `<span style="color:${cell.color}">${cell.char}</span>`;
+                    } else {
+                        row += cell;
+                    }
+                }
+                output += row + '\n';
+            }
+            document.getElementById('game-screen').innerHTML = output;
+        }
+
+        // =========================================================
+        // === 3. LÓGICA DE JUEGO (GAME LOOP) ===
+        // =========================================================
+
+        function gameLoop() {
+            // 1. Limpiar Mapa
+            gameMap = Array(SCREEN_HEIGHT).fill().map(() => Array(SCREEN_WIDTH).fill(CHARS.EMPTY));
+            
+            // 2. Procesar Inputs y Movimiento
+            handleInput();
+
+            // 3. Lógica del BYTE_SCRAMBLE (DEBE SER IMPLEMENTADA AQUÍ)
+            // byteScrambleLogic();
+
+            // 4. Lógica de Entidades (Movimiento de enemigos, Balas, etc.)
+            // updateEntities(); 
+
+            // 5. Dibujar Muros de Borde (Fijos)
+            for(let i = 0; i < SCREEN_WIDTH; i++) {
+                drawCharacter(i, 0, CHARS.WALL);
+                drawCharacter(i, SCREEN_HEIGHT - 1, CHARS.WALL);
+            }
+            for(let i = 1; i < SCREEN_HEIGHT - 1; i++) {
+                drawCharacter(0, i, CHARS.WALL);
+                drawCharacter(SCREEN_WIDTH - 1, i, CHARS.WALL);
+            }
+
+            // 6. Dibujar Objetivos (Data Clusters)
+            targets.forEach(t => {
+                drawCharacter(t.x, t.y, t.type, t.hp > 1 ? '#FF0' : '#F00'); // Amarillo, Rojo al ser dañado
+            });
+            
+            // 7. Dibujar Entidades (Enemigos)
+            entities.forEach(e => {
+                drawCharacter(e.x, e.y, e.type, '#F00'); // Enemigos en rojo
+            });
+
+            // 8. Dibujar Jugador
+            drawCharacter(player.x, player.y, CHARS.PLAYER, '#0FF'); // Jugador en cian
+
+            // 9. Renderizar
+            renderMap();
+            updateHUD();
+        }
+
+        // =========================================================
+        // === 4. FUNCIONES DE CONTROL ===
+        // =========================================================
+
+        function handleInput() {
+            // Lógica básica de movimiento (sin colisión por ahora)
+            let dx = 0;
+            let dy = 0;
+
+            if (keyPressed['KeyW']) dy -= player.speed;
+            if (keyPressed['KeyS']) dy += player.speed;
+            if (keyPressed['KeyA']) dx -= player.speed;
+            if (keyPressed['KeyD']) dx += player.speed;
+
+            // Normalización del movimiento diagonal
+            if (dx !== 0 && dy !== 0) {
+                const diagFactor = player.speed / Math.sqrt(dx * dx + dy * dy);
+                dx *= diagFactor;
+                dy *= diagFactor;
+            }
+            
+            // Aplicar movimiento
+            player.x += dx;
+            player.y += dy;
+
+            // Lógica de DASH (TODO: Implementar cooldown y lógica de invulnerabilidad)
+            if (keyPressed['Space'] && player.dashCooldown <= 0) {
+                // ... Lógica de Dash ...
+                player.dashCooldown = 15; // Ejemplo de cooldown
+            }
+            if (player.dashCooldown > 0) player.dashCooldown--;
+            
+            // Disparo (TODO: Implementar dirección de ratón y generación de balas)
+            // if (keyPressed['MouseLeft']) fireWeapon();
+        }
+
+        function updateHUD() {
+            const hudText = `
+┌───────────────────────────────────────────┐
+│ [MW: MURDERWARE]           WAVE: 01       │
+│                                           │
+│  AMMO: [======   ] 6/6   STYLE: C-         │
+│  WEAPON: PISTOL .45      HP: ${'█'.repeat(Math.ceil(player.hp))}░░░░░   │
+└───────────────────────────────────────────┘
+`;
+            document.getElementById('hud').textContent = hudText;
+        }
+
+
+        // =========================================================
+        // === 5. LISTENERS DE INPUT (TECLADO) ===
+        // =========================================================
+
+        window.addEventListener('keydown', (e) => {
+            keyPressed[e.code] = true;
+            // Evitar que el espacio haga scroll en la página
+            if (e.code === 'Space') e.preventDefault(); 
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keyPressed[e.code] = false;
+        });
+
+        // =========================================================
+        // === INICIO DEL JUEGO ===
+        // =========================================================
+        initGame();
+        
+    </script>
+</body>
+</html>
