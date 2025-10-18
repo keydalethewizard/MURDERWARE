@@ -31,276 +31,331 @@
             pointer-events: none;
             text-shadow: 0 0 5px #0FF;
             z-index: 10;
+            font-family: 'Courier New', monospace;
+        }
+        #menu {
+            position: absolute;
+            background-color: #000;
+            padding: 20px;
+            border: 2px solid #0F0;
+            box-shadow: 0 0 15px #0F0;
+            color: #0F0;
+            white-space: pre;
+            font-size: 16px;
+            z-index: 20;
+            font-family: 'Courier New', monospace;
         }
     </style>
 </head>
 <body>
     <canvas id="game-canvas"></canvas>
     <div id="hud"></div>
+    <div id="menu"></div>
 
     <audio id="audio-music-combat" src="audio/keepers_of_the_gate.mp3" loop></audio>
     <audio id="audio-sfx-shot" src="audio/blip_shot.wav"></audio>
     <audio id="audio-sfx-error" src="audio/beep_damage.wav"></audio>
+    <audio id="audio-sfx-parry" src="audio/parry.wav"></audio>
+    
+<script>
+const VIEWPORT_WIDTH = 80;
+const VIEWPORT_HEIGHT = 25;
+const MAP_WIDTH = 150;
+const MAP_HEIGHT = 50;
+const CHAR_WIDTH = 9;
+const CHAR_HEIGHT = 16;
+const CANVAS_WIDTH = VIEWPORT_WIDTH * CHAR_WIDTH;
+const CANVAS_HEIGHT = VIEWPORT_HEIGHT * CHAR_HEIGHT;
+const FPS = 60;
+const FRAME_TIME = 1000 / FPS;
+let gameRunning = false;
 
-    <script>
-        const VIEWPORT_WIDTH = 80;
-        const VIEWPORT_HEIGHT = 25;
-        const MAP_WIDTH = 150;
-        const MAP_HEIGHT = 50;
-        const CHAR_WIDTH = 9;
-        const CHAR_HEIGHT = 16;
-        const CANVAS_WIDTH = VIEWPORT_WIDTH * CHAR_WIDTH;
-        const CANVAS_HEIGHT = VIEWPORT_HEIGHT * CHAR_HEIGHT;
-        const FPS = 60;
-        const FRAME_TIME = 1000 / FPS;
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = CANVAS_WIDTH;
+canvas.height = CANVAS_HEIGHT;
+ctx.font = `${CHAR_HEIGHT}px 'Courier New', monospace`;
+ctx.textAlign = 'left';
+ctx.textBaseline = 'top';
 
-        const canvas = document.getElementById('game-canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
-        ctx.font = `${CHAR_HEIGHT}px 'Courier New', monospace`;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
+const CHARS = {
+    PLAYER: '@',
+    AIM: '>',
+    ENEMY_ERROR: 'E',
+    ENEMY_MELEE: 'M',
+    ENEMY_GUN: 'G',
+    DATA_CLUSTER: '[D]',
+    WALL: '#',
+    BULLET: '.',
+    GORE: ',',
+    BACKGROUND: '/',
+    EMPTY: ' '
+};
+const VHS_COLORS = ['#F00', '#0FF', '#FF0', '#F0F', '#0F0', '#FFF']; 
+const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]\\|{};:\'",.<>/?~`';
 
-        const CHARS = {
-            PLAYER: '@',
-            AIM: '>',
-            ENEMY_ERROR: 'E',
-            DATA_CLUSTER: '[D]',
-            WALL: '#',
-            BULLET: '.',
-            GORE: ',',
-            BACKGROUND: '/',
-            EMPTY: ' '
-        };
-        const VHS_COLORS = ['#F00', '#0FF', '#FF0', '#F0F', '#0F0', '#FFF'];
-        const SCRAMBLE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]\\|{};:\'",.<>/?~`';
+let mouse = {x:0, y:0}, aimAngle = 0, keyPressed = {}, bullets=[], entities=[], goreParticles=[], targets=[], backgroundMap=[];
+let bulletTimer = 0, selectedVirus = null, camera = {x:0, y:0}, scrambleArea=[], scrambleCharPool=[], scrambleFrame=0;
+const PARALLAX_SPEED = 0.5;
+const SCRAMBLE_SPEED = 5;
 
-        let mouse = { x: 0, y: 0 };
-        let aimAngle = 0;
-        let keyPressed = {};
-        let bullets = [];
-        let targets = [];
-        let entities = [];
-        let goreParticles = [];
-        let backgroundMap = [];
-        let scrambleArea = [];
-        let scrambleCharPool = [];
-        let scrambleFrame = 0;
-        const SCRAMBLE_SPEED = 5;
-        const PARALLAX_SPEED = 0.5;
+let player = {x: MAP_WIDTH/4, y: MAP_HEIGHT/2, hp: 20, maxHp: 20, speed: 2, dashCooldown:0, weapon:'PISTOL', ammo:12, maxAmmo:12, fireRate:5};
 
-        let camera = { x: 0, y: 0 };
+const VIRUS_CLASSES = {
+    'CODE_RED': {name:'CODE RED', speed_mod:1.0, ammo_mod:1.5, fireRate_mod:0.8, color:'#F00'},
+    'ILOVEYOU': {name:'I LOVE YOU', speed_mod:1.2, ammo_mod:1.0, fireRate_mod:1.0, color:'#FF0'},
+    'OFFIZ': {name:'OFFIZ', speed_mod:0.8, ammo_mod:1.0, fireRate_mod:1.2, color:'#F0F'}
+};
 
-        let selectedVirus = 'CODE_RED';
-        let player = { 
-            x: MAP_WIDTH / 4, 
-            y: MAP_HEIGHT / 2, 
-            hp: 20, // más vida
-            maxHp: 20,
-            speed: 1.2, // más rápido
-            dashCooldown: 0,
-            weapon: 'PISTOL',
-            ammo: 12, // más ammo
-            maxAmmo: 12,
-            fireRate: 8 
-        };
+// ------------------- ENTIDADES -------------------
+function spawnEntities(){
+    entities = [];
+    targets = [];
+    // enemigos melee
+    for(let i=0;i<10;i++){
+        entities.push({x:Math.random()*(MAP_WIDTH-10)+5, y:Math.random()*(MAP_HEIGHT-10)+5, type:CHARS.ENEMY_MELEE, hp:5, speed:1.2, melee:true});
+    }
+    // enemigos a distancia
+    for(let i=0;i<10;i++){
+        entities.push({x:Math.random()*(MAP_WIDTH-10)+5, y:Math.random()*(MAP_HEIGHT-10)+5, type:CHARS.ENEMY_GUN, hp:3, speed:1.0, melee:false, gunCooldown:Math.floor(Math.random()*60)});
+    }
+    // Data Clusters
+    for(let i=0;i<5;i++){
+        targets.push({x:Math.random()*(MAP_WIDTH-10)+5, y:Math.random()*(MAP_HEIGHT-10)+5, type:CHARS.DATA_CLUSTER, hp:3});
+    }
+}
 
-        const VIRUS_CLASSES = {
-            'CODE_RED': { name: 'CODE RED', speed_mod: 1.0, ammo_mod: 1.5, fireRate_mod: 0.8, color: '#F00' },
-            'ILOVEYOU': { name: 'I LOVE YOU', speed_mod: 1.2, ammo_mod: 1.0, fireRate_mod: 1.0, color: '#FF0' },
-            'OFFIZ': { name: 'OFFIZ (Idiot)', speed_mod: 0.8, ammo_mod: 1.0, fireRate_mod: 1.2, color: '#F0F' }
-        };
+// ------------------- INPUT -------------------
+window.addEventListener('keydown', e=>{if(gameRunning) keyPressed[e.code]=true; if(e.code==='Space') e.preventDefault();});
+window.addEventListener('keyup', e=>{if(gameRunning) keyPressed[e.code]=false;});
+window.addEventListener('mousemove', e=>{mouse.x=e.clientX; mouse.y=e.clientY;});
+window.addEventListener('mousedown', e=>{if(gameRunning&&e.button===0) keyPressed['MouseLeft']=true;});
+window.addEventListener('mouseup', e=>{if(gameRunning&&e.button===0) keyPressed['MouseLeft']=false;});
 
-        function updateByteScramble() {
-            if (Math.random() < 0.05) {
-                const x = Math.floor(Math.random() * MAP_WIDTH);
-                const y = Math.floor(Math.random() * 5) + 1;
-                if (!scrambleArea.some(p => p.x === x && p.y === y)) {
-                    scrambleArea.push({ x: x, y: y });
-                }
-            }
-            scrambleFrame++;
-            if (scrambleFrame >= SCRAMBLE_SPEED) {
-                scrambleFrame = 0;
-                scrambleCharPool = scrambleArea.map(p => ({
-                    x: p.x, y: p.y,
-                    char: SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)],
-                    color: VHS_COLORS[Math.floor(Math.random() * VHS_COLORS.length)]
-                }));
+// ------------------- DIBUJO -------------------
+function drawCharacter(x,y,char,color='#0F0'){
+    const screenX = (x-camera.x)*CHAR_WIDTH;
+    const screenY = (y-camera.y)*CHAR_HEIGHT;
+    if(screenX>=-CHAR_WIDTH && screenX<CANVAS_WIDTH && screenY>=-CHAR_HEIGHT && screenY<CANVAS_HEIGHT){
+        ctx.fillStyle=color;
+        ctx.fillText(char, screenX, screenY);
+    }
+}
+
+function drawParallaxBackground(){
+    const parallaxCameraX = camera.x*PARALLAX_SPEED;
+    const parallaxCameraY = camera.y*PARALLAX_SPEED;
+    const startX=Math.floor(parallaxCameraX);
+    const startY=Math.floor(parallaxCameraY);
+    const endX=Math.min(MAP_WIDTH,startX+VIEWPORT_WIDTH+1);
+    const endY=Math.min(MAP_HEIGHT,startY+VIEWPORT_HEIGHT+1);
+    for(let y=startY;y<endY;y++){
+        for(let x=startX;x<endX;x++){
+            const char=backgroundMap[y]?.[x];
+            if(char && char!==CHARS.EMPTY){
+                const screenX=(x-parallaxCameraX)*CHAR_WIDTH;
+                const screenY=(y-parallaxCameraY)*CHAR_HEIGHT;
+                ctx.fillStyle='#111';
+                ctx.fillText(char, screenX, screenY);
             }
         }
+    }
+}
 
-        function updateEntities() {
-            bullets = bullets.filter(b => {
-                b.x += b.dx;
-                b.y += b.dy;
-                if (b.x <= 0 || b.x >= MAP_WIDTH-1 || b.y <=0 || b.y >= MAP_HEIGHT-1) return false;
-                let hitEnemy = false;
-                for (let i = entities.length-1; i>=0; i--) {
-                    const e = entities[i];
-                    const dist = Math.hypot(b.x-e.x,b.y-e.y);
-                    if (dist<1) {
-                        e.hp-=1;
-                        hitEnemy=true;
-                        if(e.hp<=0){
-                            for(let j=0;j<5;j++){
-                                const angle=Math.random()*2*Math.PI;
-                                goreParticles.push({x:e.x,y:e.y,dx:Math.cos(angle)*0.5,dy:Math.sin(angle)*0.5,lifetime:30});
-                            }
-                            // Dar ammo al jugador si va hacia cadáver
-                            player.ammo = Math.min(player.maxAmmo, player.ammo+1);
-                            entities.splice(i,1);
-                        }
-                        break;
+function drawByteScramble(){
+    scrambleCharPool.forEach(p=>{
+        drawCharacter(p.x,p.y,p.char,p.color);
+        const dist=Math.hypot(player.x-p.x,player.y-p.y);
+        if(dist<1){player.hp-=0.05/60;playSFX('error');}
+    });
+}
+
+// ------------------- ENTIDADES -------------------
+function updateEntities(){
+    // Balas
+    bullets = bullets.filter(b=>{
+        b.x+=b.dx; b.y+=b.dy;
+        if(b.x<0||b.x>=MAP_WIDTH||b.y<0||b.y>=MAP_HEIGHT) return false;
+        for(let i=entities.length-1;i>=0;i--){
+            const e=entities[i];
+            if(Math.hypot(b.x-e.x,b.y-e.y)<1){
+                e.hp--;
+                if(e.hp<=0){
+                    for(let j=0;j<5;j++){
+                        const angle=Math.random()*Math.PI*2;
+                        goreParticles.push({x:e.x,y:e.y,dx:Math.cos(angle)*0.5,dy:Math.sin(angle)*0.5,lifetime:30});
                     }
+                    // loot ammo
+                    player.ammo = Math.min(player.maxAmmo, player.ammo+3);
+                    entities.splice(i,1);
                 }
-                return !hitEnemy;
-            });
-            entities.forEach(e=>{
-                const angle = Math.atan2(player.y-e.y,player.x-e.x);
-                e.x += e.speed * Math.cos(angle)/FPS;
-                e.y += e.speed * Math.sin(angle)/FPS;
-            });
-            goreParticles=goreParticles.filter(g=>{g.x+=g.dx/FPS; g.y+=g.dy/FPS; g.lifetime--; return g.lifetime>0;});
-        }
-
-        let bulletTimer=0;
-        function fireWeapon(){
-            if(player.ammo>0 && bulletTimer<=0){
-                player.ammo--;
-                bulletTimer=player.fireRate;
-                const speed=2;
-                const dx=speed*Math.cos(aimAngle);
-                const dy=speed*Math.sin(aimAngle);
-                bullets.push({x:player.x,y:player.y,dx,dy,type:CHARS.BULLET,color:VIRUS_CLASSES[selectedVirus].color});
+                return false;
             }
         }
+        return true;
+    });
 
-        function drawCharacter(x,y,char,color='#0F0'){
-            const screenX = (x-camera.x)*CHAR_WIDTH;
-            const screenY = (y-camera.y)*CHAR_HEIGHT;
-            if(screenX>=-CHAR_WIDTH && screenX<CANVAS_WIDTH && screenY>=-CHAR_HEIGHT && screenY<CANVAS_HEIGHT){
-                ctx.fillStyle=color;
-                ctx.fillText(char,screenX,screenY);
+    // Mover enemigos
+    entities.forEach(e=>{
+        const angle=Math.atan2(player.y-e.y,player.x-e.x);
+        let speed = e.speed/60;
+        e.x += speed*Math.cos(angle);
+        e.y += speed*Math.sin(angle);
+        // enemigos a distancia disparan
+        if(!e.melee){
+            e.gunCooldown--;
+            if(e.gunCooldown<=0){
+                const speedB=1.5;
+                bullets.push({x:e.x,y:e.y,dx:speedB*Math.cos(angle),dy:speedB*Math.sin(angle),type:CHARS.BULLET,color:'#FF0'});
+                e.gunCooldown = Math.floor(Math.random()*60)+30;
             }
         }
+    });
 
-        function drawParallaxBackground(){
-            const parallaxCameraX = camera.x * PARALLAX_SPEED;
-            const parallaxCameraY = camera.y * PARALLAX_SPEED;
-            const startX=Math.floor(parallaxCameraX);
-            const startY=Math.floor(parallaxCameraY);
-            const endX=Math.min(MAP_WIDTH,startX+VIEWPORT_WIDTH+1);
-            const endY=Math.min(MAP_HEIGHT,startY+VIEWPORT_HEIGHT+1);
-            for(let y=startY;y<endY;y++){
-                for(let x=startX;x<endX;x++){
-                    const char = backgroundMap[y]?.[x];
-                    if(char && char!==CHARS.EMPTY){
-                        drawCharacter(x,y,char,'#111');
-                    }
-                }
-            }
-        }
+    // Gore
+    goreParticles = goreParticles.filter(g=>{
+        g.x+=g.dx/60; g.y+=g.dy/60; g.lifetime--;
+        return g.lifetime>0;
+    });
+}
 
-        function drawByteScramble(){
-            scrambleCharPool.forEach(p=>{
-                drawCharacter(p.x,p.y,p.char,p.color);
-                const dist = Math.hypot(player.x-p.x,player.y-p.y);
-                if(dist<1 && player.hp>0) player.hp-=0.05/FPS;
-            });
-        }
+// ------------------- INPUT MOVIMIENTO Y DISPARO -------------------
+function handleInput(){
+    let dx=0, dy=0;
+    const speed=player.speed/60;
+    if(keyPressed['KeyW']) dy-=speed;
+    if(keyPressed['KeyS']) dy+=speed;
+    if(keyPressed['KeyA']) dx-=speed;
+    if(keyPressed['KeyD']) dx+=speed;
+    if(dx!==0||dy!==0){
+        const mag=Math.hypot(dx,dy);
+        dx/=mag; dy/=mag;
+        dx*=speed; dy*=speed;
+    }
+    player.x=Math.max(1,Math.min(MAP_WIDTH-2,player.x+dx));
+    player.y=Math.max(1,Math.min(MAP_HEIGHT-2,player.y+dy));
 
-        function updateHUD(){
-            const hpBar='█'.repeat(Math.ceil(player.hp))+'░'.repeat(player.maxHp-Math.ceil(player.hp));
-            const ammoBar='█'.repeat(player.ammo)+'░'.repeat(player.maxAmmo-player.ammo);
-            const hudText=`
-┌───────────────────────────────────────────┐
-│ [MW: MURDERWARE] - VIRUS: ${VIRUS_CLASSES[selectedVirus].name}
-│                                           │
-│  AMMO: [${ammoBar}] ${player.ammo}/${player.maxAmmo}     
-│  WEAPON: ${player.weapon}      HP: ${hpBar}   
-└───────────────────────────────────────────┘
+    // disparo
+    if(keyPressed['MouseLeft'] && bulletTimer<=0){
+        bulletTimer = player.fireRate;
+        const speedB = 2;
+        const dxB = speedB * Math.cos(aimAngle);
+        const dyB = speedB * Math.sin(aimAngle);
+        bullets.push({x:player.x,y:player.y,dx:dxB,dy:dyB,type:CHARS.BULLET,color:VIRUS_CLASSES[selectedVirus].color});
+        player.ammo--;
+        playSFX('shot');
+    }
+    if(bulletTimer>0) bulletTimer--;
+}
+
+// ------------------- HUD -------------------
+function updateHUD(){
+    const hpBar = '█'.repeat(Math.ceil(player.hp)) + '░'.repeat(player.maxHp-Math.ceil(player.hp));
+    const ammoBar = '█'.repeat(player.ammo)+'░'.repeat(player.maxAmmo-player.ammo);
+    const hudText = `
+┌───────────────────────────────┐
+│ VIRUS: ${selectedVirus ? VIRUS_CLASSES[selectedVirus].name : 'N/A'}
+│ HP: [${hpBar}]  AMMO: [${ammoBar}]
+└───────────────────────────────┘
 `;
-            document.getElementById('hud').textContent=hudText;
-        }
+    document.getElementById('hud').textContent = hudText;
+}
 
-        function handleInput(){
-            let dx=0, dy=0;
-            const currentSpeed=player.speed/FPS;
-            if(keyPressed['KeyW']) dy-=currentSpeed;
-            if(keyPressed['KeyS']) dy+=currentSpeed;
-            if(keyPressed['KeyA']) dx-=currentSpeed;
-            if(keyPressed['KeyD']) dx+=currentSpeed;
-            if(dx!==0 || dy!==0){
-                const mag=Math.hypot(dx,dy);
-                dx=dx/mag*currentSpeed;
-                dy=dy/mag*currentSpeed;
-            }
-            player.x=Math.max(1,Math.min(MAP_WIDTH-2,player.x+dx));
-            player.y=Math.max(1,Math.min(MAP_HEIGHT-2,player.y+dy));
-            if(keyPressed['MouseLeft']) fireWeapon();
-        }
+// ------------------- GAME LOOP -------------------
+function gameLoop(){
+    if(!gameRunning) return;
 
-        function updateCamera(){
-            const halfW=VIEWPORT_WIDTH/2;
-            const halfH=VIEWPORT_HEIGHT/2;
-            camera.x=player.x-halfW;
-            camera.y=player.y-halfH;
-            camera.x=Math.max(0,Math.min(MAP_WIDTH-VIEWPORT_WIDTH,camera.x));
-            camera.y=Math.max(0,Math.min(MAP_HEIGHT-VIEWPORT_HEIGHT,camera.y));
-        }
+    // cámara suave tipo Hotline Miami
+    const halfW=VIEWPORT_WIDTH/2, halfH=VIEWPORT_HEIGHT/2;
+    camera.x += ((player.x - halfW)-camera.x)*0.1;
+    camera.y += ((player.y - halfH)-camera.y)*0.1;
 
-        function gameLoop(){
-            ctx.fillStyle='#000';
-            ctx.fillRect(0,0,CANVAS_WIDTH,CANVAS_HEIGHT);
-            handleInput();
-            updateEntities();
-            updateByteScramble();
-            drawParallaxBackground();
-            // Muros
-            for(let i=0;i<MAP_WIDTH;i++){drawCharacter(i,0,CHARS.WALL); drawCharacter(i,MAP_HEIGHT-1,CHARS.WALL);}
-            for(let i=1;i<MAP_HEIGHT-1;i++){drawCharacter(0,i,CHARS.WALL); drawCharacter(MAP_WIDTH-1,i,CHARS.WALL);}
-            // Objetivos
-            targets.forEach(t=>drawCharacter(t.x,t.y,t.type,t.hp>1?'#FF0':'#F00'));
-            // Entidades
-            entities.forEach(e=>drawCharacter(e.x,e.y,e.type,'#F00'));
-            bullets.forEach(b=>drawCharacter(b.x,b.y,b.type,b.color));
-            goreParticles.forEach(g=>drawCharacter(g.x,g.y,CHARS.GORE,'#F00'));
-            drawByteScramble();
-            updateCamera();
-            const canvasRect = canvas.getBoundingClientRect();
-            aimAngle=Math.atan2(mouse.y-(player.y-camera.y)*CHAR_HEIGHT,mouse.x-(player.x-camera.x)*CHAR_WIDTH);
-            drawCharacter(player.x,player.y,CHARS.PLAYER,'#0FF');
-            drawCharacter(player.x+Math.cos(aimAngle)*1.5,player.y+Math.sin(aimAngle)*1.5,CHARS.AIM,'#F0F');
-            updateHUD();
-            bulletTimer--;
-        }
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,CANVAS_WIDTH,CANVAS_HEIGHT);
+    drawParallaxBackground();
+    updateEntities();
+    updateByteScramble();
 
-        function initGame(){
-            backgroundMap=Array(MAP_HEIGHT).fill().map(()=>Array(MAP_WIDTH).fill().map(()=>Math.random()<0.2?CHARS.BACKGROUND:CHARS.EMPTY));
-            // Generar enemigos y targets
-            entities=[];
-            for(let i=0;i<20;i++){
-                entities.push({x:10+Math.random()*(MAP_WIDTH-20),y:1+Math.random()*(MAP_HEIGHT-2),type:CHARS.ENEMY_ERROR,hp:3,speed:0.6});
-            }
-            targets=[];
-            for(let i=0;i<5;i++){
-                targets.push({x:10+Math.random()*(MAP_WIDTH-20),y:1+Math.random()*(MAP_HEIGHT-2),type:CHARS.DATA_CLUSTER,hp:3});
-            }
-            setInterval(updateByteScramble,FRAME_TIME);
-            setInterval(gameLoop,FRAME_TIME);
-        }
+    // bordes
+    for(let i=0;i<MAP_WIDTH;i++){drawCharacter(i,0,CHARS.WALL); drawCharacter(i,MAP_HEIGHT-1,CHARS.WALL);}
+    for(let i=1;i<MAP_HEIGHT-1;i++){drawCharacter(0,i,CHARS.WALL); drawCharacter(MAP_WIDTH-1,i,CHARS.WALL);}
 
-        window.addEventListener('keydown',e=>keyPressed[e.code]=true);
-        window.addEventListener('keyup',e=>keyPressed[e.code]=false);
-        window.addEventListener('mousemove',e=>{mouse.x=e.clientX; mouse.y=e.clientY;});
-        window.addEventListener('mousedown',e=>{if(e.button===0) keyPressed['MouseLeft']=true;});
-        window.addEventListener('mouseup',e=>{if(e.button===0) keyPressed['MouseLeft']=false;});
+    targets.forEach(t=>drawCharacter(t.x,t.y,t.type,'#FF0'));
+    entities.forEach(e=>drawCharacter(e.x,e.y,e.type,e.melee?'#F0F':'#F00'));
+    bullets.forEach(b=>drawCharacter(b.x,b.y,b.type,b.color));
+    goreParticles.forEach(g=>drawCharacter(g.x,g.y,CHARS.GORE,'#F00'));
 
-        initGame();
-        document.getElementById('audio-music-combat').volume=0.5;
-        document.getElementById('audio-music-combat').play().catch(e=>{});
-    </script>
+    // jugador y puntero
+    const rect=canvas.getBoundingClientRect();
+    const playerPixelX=(player.x-camera.x)*CHAR_WIDTH+rect.left;
+    const playerPixelY=(player.y-camera.y)*CHAR_HEIGHT+rect.top;
+    aimAngle = Math.atan2(mouse.y-playerPixelY, mouse.x-playerPixelX);
+    const aimX=player.x+1.5*Math.cos(aimAngle);
+    const aimY=player.y+1.5*Math.sin(aimAngle);
+    drawCharacter(aimX,aimY,CHARS.AIM,'#0FF');
+    drawCharacter(player.x,player.y,CHARS.PLAYER,'#0FF');
+
+    updateHUD();
+}
+
+// ------------------- BYTE SCRAMBLE -------------------
+function updateByteScramble(){
+    if(Math.random()<0.05){
+        const x=Math.floor(Math.random()*MAP_WIDTH);
+        const y=Math.floor(Math.random()*5)+1;
+        if(!scrambleArea.some(p=>p.x===x&&p.y===y)) scrambleArea.push({x,y});
+    }
+    scrambleFrame++;
+    if(scrambleFrame>=SCRAMBLE_SPEED){
+        scrambleFrame=0;
+        scrambleCharPool = scrambleArea.map(p=>({
+            x:p.x, y:p.y,
+            char:SCRAMBLE_CHARS[Math.floor(Math.random()*SCRAMBLE_CHARS.length)],
+            color:VHS_COLORS[Math.floor(Math.random()*VHS_COLORS.length)]
+        }));
+    }
+}
+
+// ------------------- AUDIO -------------------
+function initAudio(){document.getElementById('audio-music-combat').volume=0.5; document.getElementById('audio-music-combat').play().catch(e=>{});}
+function playSFX(name){const audio=document.getElementById('audio-sfx-'+name); if(audio){audio.currentTime=0; audio.volume=name==='error'?0.2:1.0; audio.play().catch(e=>{});}}
+
+// ------------------- MENÚ -------------------
+function showMenu(){
+    const menuHTML = `
+> EXECUTE MW: MURDERWARE
+[SELECT INFECTION TYPE]
+
+  [1] CODE RED
+  [2] ILOVEYOU
+  [3] OFFIZ
+
+> Press 1-3 to start
+`;
+    document.getElementById('menu').innerHTML=menuHTML;
+}
+
+function handleMenuInput(e){
+    if(['1','2','3'].includes(e.key)){
+        const map = {'1':'CODE_RED','2':'ILOVEYOU','3':'OFFIZ'};
+        selectedVirus = map[e.key];
+        document.getElementById('menu').style.display='none';
+        // ajustar stats del virus
+        const virus = VIRUS_CLASSES[selectedVirus];
+        player.speed *= virus.speed_mod;
+        player.maxAmmo = Math.round(player.maxAmmo*virus.ammo_mod);
+        player.ammo = player.maxAmmo;
+        player.fireRate = Math.round(player.fireRate/virus.fireRate_mod);
+        spawnEntities();
+        gameRunning=true;
+        initAudio();
+        setInterval(gameLoop,FRAME_TIME);
+        setInterval(updateByteScramble,FRAME_TIME);
+        window.removeEventListener('keydown',handleMenuInput);
+    }
+}
+
+showMenu();
+window.addEventListener('keydown',handleMenuInput);
+</script>
 </body>
 </html>
